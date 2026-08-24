@@ -33,7 +33,9 @@ const getWsUrl = () => {
 export const App: React.FC = () => {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Player State
   const [myPlayerId, setMyPlayerId] = useState<string>('');
@@ -117,41 +119,72 @@ export const App: React.FC = () => {
     SoundManager.setVolume(settings.soundVolume);
   }, [settings.soundVolume]);
 
-  // Connect WebSocket
+  // Connect WebSocket with auto-reconnect
   useEffect(() => {
-    const wsUrl = getWsUrl();
-    const ws = new WebSocket(wsUrl);
-    socketRef.current = ws;
+    let destroyed = false;
+    let retryCount = 0;
+    const MAX_RETRIES = 20;
+    const BASE_DELAY_MS = 1500;
 
-    ws.onopen = () => {
-      setIsConnected(true);
-      setErrorMsg(null);
+    const connect = () => {
+      if (destroyed) return;
+      const wsUrl = getWsUrl();
+      const ws = new WebSocket(wsUrl);
+      socketRef.current = ws;
+
+      ws.onopen = () => {
+        setIsConnected(true);
+        setIsReconnecting(false);
+        setErrorMsg(null);
+        retryCount = 0;
+        setSocket(ws);
+        // Re-join lobby if we had already joined before disconnect
+        if (hasJoined && playerName) {
+          const msg: ClientMessage = { type: 'JOIN_LOBBY', name: playerName, teamId: selectedTeam || undefined };
+          ws.send(JSON.stringify(msg));
+        }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg: ServerMessage = JSON.parse(event.data);
+          handleServerMessage(msg);
+        } catch (e) {
+          console.error('Failed to parse server message', e);
+        }
+      };
+
+      ws.onclose = () => {
+        setIsConnected(false);
+        setSocket(null);
+        socketRef.current = null;
+        if (destroyed) return;
+        if (retryCount < MAX_RETRIES) {
+          retryCount++;
+          const delay = Math.min(BASE_DELAY_MS * retryCount, 15000);
+          setIsReconnecting(true);
+          setErrorMsg(`Connection lost — reconnecting... (attempt ${retryCount})`);
+          reconnectTimerRef.current = setTimeout(connect, delay);
+        } else {
+          setIsReconnecting(false);
+          setErrorMsg('Unable to reconnect. Please refresh the page.');
+        }
+      };
+
+      ws.onerror = () => {
+        // onerror always fires before onclose — let onclose handle retry
+        setIsConnected(false);
+      };
     };
 
-    ws.onmessage = (event) => {
-      try {
-        const msg: ServerMessage = JSON.parse(event.data);
-        handleServerMessage(msg);
-      } catch (e) {
-        console.error('Failed to parse server message', e);
-      }
-    };
-
-    ws.onclose = () => {
-      setIsConnected(false);
-      setErrorMsg('Disconnected from game server. Please refresh to reconnect.');
-    };
-
-    ws.onerror = () => {
-      setIsConnected(false);
-      setErrorMsg('Unable to connect to game server. Check network or wait for server to start.');
-    };
-
-    setSocket(ws);
+    connect();
 
     return () => {
-      ws.close();
+      destroyed = true;
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      socketRef.current?.close();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Setup Input Manager
@@ -355,20 +388,22 @@ export const App: React.FC = () => {
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
 
-      {/* Global Error Banner */}
-      {errorMsg && (
+      {/* Global Error / Reconnecting Banner */}
+      {(errorMsg || isReconnecting) && (
         <div style={{
           position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
-          background: 'rgba(255, 42, 95, 0.95)', color: '#fff', padding: '8px 20px',
-          borderRadius: '8px', zIndex: 999, fontWeight: 700, fontSize: '14px',
-          boxShadow: '0 4px 16px rgba(0,0,0,0.5)', maxWidth: '80vw', textAlign: 'center',
+          background: isReconnecting ? 'rgba(255, 122, 0, 0.95)' : 'rgba(255, 42, 95, 0.95)',
+          color: '#fff', padding: '8px 20px', borderRadius: '8px',
+          zIndex: 999, fontWeight: 700, fontSize: '14px',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.5)', maxWidth: '90vw', textAlign: 'center',
+          animation: isReconnecting ? 'neon-pulse 1.5s infinite' : undefined,
         }}>
-          {errorMsg}
+          {isReconnecting ? `⟳ ${errorMsg || 'Reconnecting...'}` : errorMsg}
         </div>
       )}
 
-      {/* Connection indicator */}
-      {!isConnected && !errorMsg && (
+      {/* Initial connecting indicator (first load) */}
+      {!isConnected && !isReconnecting && !errorMsg && (
         <div style={{
           position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
           background: 'rgba(255, 122, 0, 0.9)', color: '#fff', padding: '6px 18px',

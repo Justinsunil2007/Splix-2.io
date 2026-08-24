@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: splix2io-server
+    runtime: node
+    region: oregon
+    plan: free
+    buildCommand: npm install && npm run build:server
+    startCommand: node dist/server/src/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        generateValue: false
+        value: 8080
+      - key: ADMIN_SECRET
+        sync: false   # Set manually in Render dashboard — do NOT commit
+      - key: CORS_ORIGIN
+        sync: false   # Set to your Vercel URL e.g. https://splix2io.vercel.app

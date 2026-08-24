@@ -5,14 +5,24 @@ import { ClientMessage, ServerMessage } from '../../shared/types.js';
 import { SERVER_CONFIG, TEAM_PALETTES } from '../../shared/constants.js';
 import { Match } from './Match.js';
 
-// Server-side authoritative admin token management
+// ── Server-side authoritative admin token management ────────────
+// ADMIN_SECRET must be set via environment variable in production.
+// The 'justin' fallback is only for local development.
 const ADMIN_PASSWORD = process.env.ADMIN_SECRET || process.env.ADMIN_PASSWORD || 'justin';
 const activeAdminTokens = new Set<string>();
+
+// ── Reconnection: keep player state for 30s after disconnect ────
+const RECONNECT_GRACE_MS = 30_000;
+const pendingDisconnects = new Map<string, NodeJS.Timeout>(); // playerId → timeout
+
+// ── Message size guard (prevent DOS via huge payloads) ──────────
+const MAX_MSG_BYTES = 4096;
 
 export class GameServer {
   private wss: WebSocketServer;
   public match: Match;
-  private clientSockets: Map<WebSocket, string> = new Map(); // socket -> playerId
+  private clientSockets: Map<WebSocket, string> = new Map(); // socket → playerId
+  private playerSockets: Map<string, WebSocket> = new Map();  // playerId → socket
   private loopInterval: NodeJS.Timeout | null = null;
   private botMoveInterval: NodeJS.Timeout | null = null;
   private lastTickTime: number = Date.now();
@@ -27,8 +37,9 @@ export class GameServer {
 
   private setupWebSocketServer() {
     this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
-      const playerId = 'p_' + Math.random().toString(36).substring(2, 9);
+      const playerId = 'p_' + crypto.randomBytes(8).toString('hex');
       this.clientSockets.set(ws, playerId);
+      this.playerSockets.set(playerId, ws);
 
       // Send initial state upon connection
       this.send(ws, {
@@ -50,25 +61,48 @@ export class GameServer {
         records: this.match.matchHistory,
       });
 
-      ws.on('message', (raw: string) => {
+      ws.on('message', (raw: Buffer | string) => {
         try {
-          const data: ClientMessage = JSON.parse(raw.toString());
+          // Guard: reject oversized messages
+          const str = raw.toString();
+          if (str.length > MAX_MSG_BYTES) {
+            console.warn(`Oversized message from ${playerId} (${str.length} bytes) — dropped`);
+            return;
+          }
+          const data: ClientMessage = JSON.parse(str);
           this.handleClientMessage(ws, playerId, data);
         } catch (err) {
-          console.error('Failed to parse client message:', err);
+          // Malformed JSON — ignore, do not crash
         }
       });
 
       ws.on('close', () => {
         this.clientSockets.delete(ws);
-        this.match.removePlayer(playerId);
+        this.playerSockets.delete(playerId);
+
+        // Reconnection grace: don't remove player immediately
+        // If they reconnect within RECONNECT_GRACE_MS, they rejoin seamlessly
+        const activeStatuses = ['ACTIVE', 'ZONE_SHRINKING', 'ENDGAME', 'PAUSED'];
+        if (activeStatuses.includes(this.match.status)) {
+          const timeout = setTimeout(() => {
+            pendingDisconnects.delete(playerId);
+            this.match.removePlayer(playerId);
+            // Broadcast updated state so everyone's HUD is accurate
+            this.broadcast({ type: 'TICK_UPDATE', state: this.match.getSnapshot() });
+          }, RECONNECT_GRACE_MS);
+          pendingDisconnects.set(playerId, timeout);
+        } else {
+          // In lobby or match-end: remove immediately
+          this.match.removePlayer(playerId);
+        }
+
         if (this.match.status === 'MATCH_END' && this.clientSockets.size === 0) {
           this.match.resetToLobby();
         }
       });
 
       ws.on('error', (err) => {
-        console.error(`Socket error for player ${playerId}:`, err);
+        console.error(`Socket error for player ${playerId}:`, err.message);
       });
     });
   }
@@ -89,6 +123,16 @@ export class GameServer {
       }
 
       case 'CREATE_TEAM': {
+        // Block team creation during active match
+        const lobbyStatuses = ['LOBBY', 'WAITING'];
+        if (!lobbyStatuses.includes(this.match.status)) {
+          this.send(ws, {
+            type: 'ERROR_MESSAGE',
+            code: 'CREATE_TEAM_FAILED',
+            message: 'Cannot create teams while a match is in progress.',
+          });
+          return;
+        }
         const player = this.match.players.get(playerId);
         const creatorName = player ? player.name : 'Operative';
         const team = this.match.createTeam(creatorName, msg.name, msg.colorIndex, msg.symbol);
@@ -100,7 +144,6 @@ export class GameServer {
           });
           return;
         }
-
         if (player) {
           this.match.setPlayerTeam(playerId, team.id);
         }
@@ -109,6 +152,29 @@ export class GameServer {
 
       case 'JOIN_LOBBY': {
         const cleanName = (msg.name || 'Operative').trim().substring(0, SERVER_CONFIG.MAX_NAME_LENGTH) || 'Operative';
+
+        // ── MATCH LOCK: reject joins during active play ─────────
+        const activeStatuses = ['ACTIVE', 'ZONE_SHRINKING', 'ENDGAME', 'COUNTDOWN', 'INTRO'];
+        const existingPlayer = this.match.players.get(playerId);
+
+        if (activeStatuses.includes(this.match.status) && !existingPlayer) {
+          // Check if this is a reconnecting player (pending disconnect grace)
+          if (!pendingDisconnects.has(playerId)) {
+            this.send(ws, {
+              type: 'ERROR_MESSAGE',
+              code: 'MATCH_IN_PROGRESS',
+              message: 'A match is currently in progress. Please wait for the next round.',
+            });
+            return;
+          }
+        }
+
+        // Cancel pending disconnect if player reconnects
+        if (pendingDisconnects.has(playerId)) {
+          clearTimeout(pendingDisconnects.get(playerId)!);
+          pendingDisconnects.delete(playerId);
+          console.log(`Player ${playerId} reconnected within grace period`);
+        }
 
         if (this.match.status === 'MATCH_END') {
           this.match.resetToLobby();
@@ -120,6 +186,7 @@ export class GameServer {
           player = added ?? undefined;
         } else {
           player.name = cleanName;
+          player.socket = ws; // Update socket ref on reconnect
           if (msg.teamId) {
             this.match.setPlayerTeam(playerId, msg.teamId);
           }
@@ -129,7 +196,7 @@ export class GameServer {
           this.send(ws, {
             type: 'ERROR_MESSAGE',
             code: 'JOIN_FAILED',
-            message: 'Match in progress or lobby is full (max 30 players). Please wait for the next round.',
+            message: 'Lobby is full (max 30 players). Please wait for the next round.',
           });
           return;
         }
@@ -151,7 +218,7 @@ export class GameServer {
           this.send(ws, {
             type: 'ERROR_MESSAGE',
             code: 'TEAM_CHANGE_FAILED',
-            message: 'Cannot switch to this squad (squad is full with 5 players or match is active).',
+            message: 'Cannot switch to this squad (full, or match is active).',
           });
         }
         break;
@@ -159,7 +226,7 @@ export class GameServer {
 
       case 'TOGGLE_READY': {
         const player = this.match.players.get(playerId);
-        if (player) {
+        if (player && (this.match.status === 'LOBBY' || this.match.status === 'WAITING')) {
           player.isReady = !player.isReady;
         }
         break;
@@ -167,14 +234,20 @@ export class GameServer {
 
       case 'SET_DIRECTION': {
         const player = this.match.players.get(playerId);
-        if (player && player.isAlive && !this.match.isPaused) {
+        // Server-authoritative: only accept direction from alive players during active match
+        if (
+          player &&
+          player.isAlive &&
+          !player.isBot &&
+          !this.match.isPaused &&
+          (this.match.status === 'ACTIVE' || this.match.status === 'ZONE_SHRINKING' || this.match.status === 'ENDGAME')
+        ) {
           player.queueDirection(msg.direction);
         }
         break;
       }
 
       case 'ADMIN_LOGIN': {
-        // Authoritative secure token generation
         if (msg.token === ADMIN_PASSWORD) {
           const sessionToken = 'adm_' + crypto.randomBytes(16).toString('hex');
           activeAdminTokens.add(sessionToken);
@@ -195,18 +268,18 @@ export class GameServer {
       }
 
       case 'ADMIN_COMMAND': {
-        // Validate admin session token
+        // Validate admin session token server-side — normal players cannot bypass this
         if (!activeAdminTokens.has(msg.token) && msg.token !== ADMIN_PASSWORD) {
           this.send(ws, {
             type: 'ERROR_MESSAGE',
             code: 'UNAUTHORIZED',
-            message: 'Unauthorized action. Invalid organizer authorization token.',
+            message: 'Unauthorized. Invalid organizer token.',
           });
           return;
         }
 
         if (msg.command === 'START_MATCH') {
-          if (this.match.status === 'LOBBY') {
+          if (this.match.status === 'LOBBY' || this.match.status === 'WAITING') {
             this.match.startIntro();
           }
         } else if (msg.command === 'PAUSE_MATCH') {
@@ -228,14 +301,8 @@ export class GameServer {
           this.clearSimulatedBots();
         } else if (msg.command === 'CLEAR_HISTORY') {
           this.match.matchHistory = [];
-          this.broadcast({
-            type: 'TOURNAMENT_STANDINGS',
-            standings: [],
-          });
-          this.broadcast({
-            type: 'MATCH_HISTORY',
-            records: [],
-          });
+          this.broadcast({ type: 'TOURNAMENT_STANDINGS', standings: [] });
+          this.broadcast({ type: 'MATCH_HISTORY', records: [] });
         }
         break;
       }
@@ -245,7 +312,6 @@ export class GameServer {
   public simulateTournamentBots(totalBots: number = 25) {
     this.clearSimulatedBots();
 
-    // Create 5 squads
     const squadNames = ['Phoenix Apex', 'Cobalt Vanguard', 'Emerald Pulse', 'Solaris Prime', 'Vortex Legion'];
     const teamIds: string[] = [];
 
@@ -255,13 +321,12 @@ export class GameServer {
       if (team) teamIds.push(team.id);
     }
 
-    // Add 5 bots per squad = 25 bots
     let botIndex = 1;
     for (let s = 0; s < teamIds.length; s++) {
       const tid = teamIds[s];
       for (let p = 0; p < 5; p++) {
         const botId = `bot_${botIndex}`;
-        const bot = this.match.addPlayer(botId, `Operative_${botIndex}`, tid, null);
+        const bot = this.match.addPlayer(botId, `Bot_${botIndex}`, tid, null);
         if (bot) {
           bot.isBot = true;
           bot.isReady = true;
@@ -271,10 +336,13 @@ export class GameServer {
       }
     }
 
-    // Start bot random steering
     const dirs = ['UP', 'DOWN', 'LEFT', 'RIGHT'] as const;
     this.botMoveInterval = setInterval(() => {
-      if (this.match.status !== 'ACTIVE' && this.match.status !== 'ZONE_SHRINKING' && this.match.status !== 'ENDGAME') return;
+      if (
+        this.match.status !== 'ACTIVE' &&
+        this.match.status !== 'ZONE_SHRINKING' &&
+        this.match.status !== 'ENDGAME'
+      ) return;
       if (this.match.isPaused) return;
 
       for (const botId of this.simulatedBots) {
@@ -286,7 +354,7 @@ export class GameServer {
       }
     }, 450);
 
-    this.match.logEvent('MATCH_START', `Simulated 25 Tournament Bots across 5 squads`);
+    this.match.logEvent('MATCH_START', `Simulated ${totalBots} Tournament Bots across 5 squads`);
   }
 
   public clearSimulatedBots() {
@@ -308,10 +376,8 @@ export class GameServer {
       const dtSeconds = (now - this.lastTickTime) / 1000;
       this.lastTickTime = now;
 
-      // Update simulation
       this.match.update(dtSeconds);
 
-      // Collect diffs and broadcast snapshot
       const diffs = this.match.grid.flushDiffs();
       const snapshot = this.match.getSnapshot();
 
