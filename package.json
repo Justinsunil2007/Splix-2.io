@@ -4,12 +4,14 @@
   "description": "5v5 Team Battle Royale Territory Game — Splix 2.io",
   "scripts": {
     "dev": "concurrently -k -p \"[{name}]\" -c \"cyan.bold,magenta.bold\" -n \"SERVER,CLIENT\" \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:lan": "concurrently -k -p \"[{name}]\" -c \"cyan.bold,magenta.bold\" -n \"SERVER,CLIENT\" \"npm run dev:server\" \"vite --host 0.0.0.0\"",
     "dev:server": "tsx watch server/src/index.ts",
-    "dev:client": "vite",
+    "dev:client": "vite --host 0.0.0.0",
     "build:server": "tsc -p tsconfig.server.json",
     "build:client": "vite build",
     "build": "npm run build:server && npm run build:client",
     "start": "node dist/server/src/index.js",
+    "preview": "vite preview --host 0.0.0.0",
     "stress-test": "tsx server/src/stressTest.ts"
   },
   "dependencies": {

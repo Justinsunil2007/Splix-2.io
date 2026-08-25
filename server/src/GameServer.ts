@@ -39,6 +39,13 @@ export class GameServer {
       this.playerToSocket.set(playerId, socket);
 
       // Send initial state immediately on connect
+      const hostInfo = {
+        mode: (process.env.NODE_ENV === 'production' && !process.env.LAN_MODE ? 'ONLINE' : 'LAN') as 'LAN' | 'ONLINE',
+        serverPort: parseInt(process.env.PORT || process.env.SERVER_PORT || String(SERVER_CONFIG.PORT), 10),
+        uptime: Math.floor(process.uptime()),
+        connectedPlayers: this.match.players.size,
+      };
+
       socket.emit('INIT_STATE', {
         type: 'INIT_STATE',
         playerId,
@@ -46,6 +53,7 @@ export class GameServer {
         mapHeight: SERVER_CONFIG.MAP_HEIGHT,
         grid: this.match.grid.cells,
         state: this.match.getSnapshot(),
+        hostInfo,
       });
 
       socket.emit('TOURNAMENT_STANDINGS', {

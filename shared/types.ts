@@ -107,6 +107,15 @@ export interface GameEventLogEntry {
   description: string;
 }
 
+export interface ServerHostInfo {
+  mode: 'LAN' | 'ONLINE';
+  serverPort: number;
+  lanIp?: string;
+  lanUrl?: string;
+  uptime: number;
+  connectedPlayers: number;
+}
+
 export interface GameStateSnapshot {
   status: MatchStatus;
   timer: number;
@@ -125,6 +134,7 @@ export interface GameStateSnapshot {
   totalConnectedCount: number;
   readyCount: number;
   serverTickRate: number;
+  hostInfo?: ServerHostInfo;
 }
 
 // Client to Server Message Types
@@ -140,7 +150,7 @@ export type ClientMessage =
 
 // Server to Client Message Types
 export type ServerMessage =
-  | { type: 'INIT_STATE'; playerId: string; mapWidth: number; mapHeight: number; grid: (string | null)[][]; state: GameStateSnapshot }
+  | { type: 'INIT_STATE'; playerId: string; mapWidth: number; mapHeight: number; grid: (string | null)[][]; state: GameStateSnapshot; hostInfo?: ServerHostInfo }
   | { type: 'TICK_UPDATE'; state: GameStateSnapshot; territoryDiffs?: TerritoryDiff[] }
   | { type: 'TERRITORY_FULL_SYNC'; grid: (string | null)[][] }
   | { type: 'KILL_FEED'; event: KillEvent }
@@ -157,4 +167,6 @@ export type ServerMessage =
   | { type: 'EVENT_LOGS'; logs: GameEventLogEntry[] }
   | { type: 'ERROR_MESSAGE'; code: string; message: string }
   | { type: 'ADMIN_AUTH_RESULT'; success: boolean; message: string }
-  | { type: 'PONG'; clientTime: number; serverTime: number };
+  | { type: 'PONG'; clientTime: number; serverTime: number }
+  | { type: 'HOST_INFO'; hostInfo: ServerHostInfo };
+

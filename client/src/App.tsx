@@ -23,12 +23,44 @@ import { ScoreboardModal } from './components/ScoreboardModal.js';
 import { SoundManager } from './audio/SoundManager.js';
 import { InputManager } from './game/InputManager.js';
 
-// Resolve the server URL — VITE_SERVER_URL or auto-detect
-const getServerUrl = () => {
-  if (import.meta.env.VITE_SERVER_URL) {
-    return import.meta.env.VITE_SERVER_URL as string;
+// Helper to check if a hostname is a local LAN / loopback host
+const isLocalOrLanHostname = (hostname: string): boolean => {
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0' || hostname === '::1') {
+    return true;
   }
-  // In development: connect to local server on port 8080
+  // Private IPv4 ranges: 192.168.x.x, 10.x.x.x, 172.16.x.x-172.31.x.x
+  return (
+    /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+    /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)
+  );
+};
+
+// Resolve the server URL — supports both local LAN mode and cloud Vercel/Render deployments
+export const getServerUrl = (): string => {
+  const currentHostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+  const isLan = isLocalOrLanHostname(currentHostname);
+
+  // 1. If explicitly opened on a LAN IP / localhost, always connect to the LAN WebSocket server
+  if (isLan) {
+    const serverPort = import.meta.env.VITE_SERVER_PORT || '8080';
+    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+    return `${protocol}//${currentHostname}:${serverPort}`;
+  }
+
+  // 2. Otherwise (e.g. deployed on Vercel domain), use the configured production backend
+  const configuredUrl = import.meta.env.VITE_GAME_SERVER_URL || import.meta.env.VITE_SERVER_URL;
+  if (configuredUrl) {
+    let url = configuredUrl.trim();
+    if (url.startsWith('wss://')) {
+      url = 'https://' + url.slice(6);
+    } else if (url.startsWith('ws://')) {
+      url = 'http://' + url.slice(5);
+    }
+    return url;
+  }
+
+  // Fallback default
   return `${window.location.protocol}//${window.location.hostname}:8080`;
 };
 
@@ -182,7 +214,11 @@ export const App: React.FC = () => {
     socket.on('INIT_STATE', (msg: any) => {
       setMyPlayerId(msg.playerId);
       setGrid(msg.grid);
-      setGameState(msg.state);
+      const snapshot: GameStateSnapshot = msg.state;
+      if (msg.hostInfo) {
+        snapshot.hostInfo = msg.hostInfo;
+      }
+      setGameState(snapshot);
     });
 
     socket.on('TICK_UPDATE', (msg: any) => {

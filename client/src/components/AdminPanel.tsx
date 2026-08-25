@@ -136,7 +136,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </form>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {/* Real-time Status Card */}
+            {/* Real-time Network & Tournament Status Card */}
             <div
               style={{
                 display: 'grid',
@@ -148,6 +148,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 border: '1px solid rgba(255, 255, 255, 0.08)',
               }}
             >
+              <div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>NETWORK MODE</div>
+                <div style={{ fontSize: '13px', fontWeight: 800, color: gameState?.hostInfo?.mode === 'ONLINE' ? '#00d2ff' : '#00ff88' }}>
+                  {gameState?.hostInfo?.mode || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && !window.location.hostname.includes('vercel') ? 'LAN' : 'ONLINE')}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>SERVER STATUS</div>
+                <div style={{ fontSize: '13px', fontWeight: 800, color: '#00ff88' }}>ONLINE (ACTIVE)</div>
+              </div>
               <div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>MATCH STATUS</div>
                 <div style={{ fontSize: '14px', fontWeight: 800, color: '#00d2ff' }}>{gameState?.status}</div>
@@ -163,6 +173,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>TICK RATE</div>
                 <div style={{ fontSize: '14px', fontWeight: 800, color: '#b026ff' }}>{gameState?.serverTickRate || 20} Hz</div>
+              </div>
+            </div>
+
+            {/* LAN Joining Banner */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '8px',
+                background: 'rgba(0, 210, 255, 0.08)',
+                border: '1px solid rgba(0, 210, 255, 0.25)',
+                borderRadius: '8px',
+                padding: '10px 14px',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '11px', color: '#00d2ff', fontWeight: 700 }}>LAN PLAYER JOIN URL:</div>
+                <div style={{ fontSize: '13px', fontFamily: 'var(--font-mono)', color: '#fff', fontWeight: 700 }}>
+                  {typeof window !== 'undefined' ? window.location.origin : 'http://<HOST_IP>:5173'}
+                </div>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                Port: <span style={{ color: '#00ff88', fontFamily: 'var(--font-mono)' }}>{gameState?.hostInfo?.serverPort || 8080}</span>
               </div>
             </div>
 

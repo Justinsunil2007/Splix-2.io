@@ -602,7 +602,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             className="glass-panel"
             style={{
               width: '100%',
-              maxWidth: '420px',
+              maxWidth: '460px',
               padding: '28px',
               textAlign: 'center',
               display: 'flex',
@@ -611,18 +611,54 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               gap: '16px',
             }}
           >
-            <div style={{ fontSize: '18px', fontWeight: 800, color: '#00d2ff' }}>
-              SCAN TO JOIN MATCH
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '18px', fontWeight: 800, color: '#00d2ff' }}>
+              <QrCode size={20} color="#00d2ff" />
+              <span>LAN GAME JOIN QR CODE</span>
             </div>
-            <div style={{ background: '#fff', padding: '12px', borderRadius: '12px' }}>
-              <img src={qrApiUrl} alt="Game QR Code" style={{ width: '200px', height: '200px', display: 'block' }} />
+
+            {/* Network Mode Badge */}
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 12px',
+              borderRadius: '20px',
+              background: 'rgba(0, 255, 136, 0.1)',
+              border: '1px solid rgba(0, 255, 136, 0.3)',
+              color: '#00ff88',
+              fontSize: '12px',
+              fontWeight: 700,
+            }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#00ff88', display: 'inline-block' }} />
+              {gameState?.hostInfo?.mode === 'ONLINE' ? 'ONLINE TOURNAMENT' : 'LOCAL LAN TOURNAMENT'}
             </div>
-            <div style={{ wordBreak: 'break-all', fontFamily: 'var(--font-mono)', fontSize: '13px', color: '#00ff88' }}>
-              {currentHostUrl}
+
+            <div style={{ background: '#fff', padding: '12px', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+              <img
+                src={qrApiUrl}
+                alt="Game QR Code"
+                style={{ width: '200px', height: '200px', display: 'block' }}
+              />
             </div>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-              Players on the same Wi-Fi can scan this QR code on their phone to immediately join the tournament lobby!
+
+            <div style={{
+              background: 'rgba(0,0,0,0.4)',
+              border: '1px solid rgba(0, 210, 255, 0.2)',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              width: '100%',
+              boxSizing: 'border-box',
+            }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>PLAYER JOIN URL:</div>
+              <div style={{ wordBreak: 'break-all', fontFamily: 'var(--font-mono)', fontSize: '14px', color: '#00ff88', fontWeight: 700 }}>
+                {currentHostUrl}
+              </div>
+            </div>
+
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>
+              All players connected to this computer lab LAN can scan this QR code on mobile or enter the URL above on their lab PC browser!
             </p>
+
             <button
               type="button"
               onClick={() => setShowQrModal(false)}
