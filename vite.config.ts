@@ -12,7 +12,15 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    host: true
+    host: true,
+    proxy: {
+      // Proxy Socket.IO to the game server — avoids CORS in development
+      '/socket.io': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        ws: true,
+      },
+    },
   },
   build: {
     outDir: 'dist/client',

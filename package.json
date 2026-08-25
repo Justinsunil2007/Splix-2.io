@@ -1,8 +1,9 @@
 {
-  "name": "terra-clash-dominion",
-  "version": "1.0.0",
-  "description": "5v5 Team Battle Royale Territory Game",
+  "name": "splix-2-io",
+  "version": "2.5.0",
+  "description": "5v5 Team Battle Royale Territory Game — Splix 2.io",
   "scripts": {
+    "dev": "concurrently -k -p \"[{name}]\" -c \"cyan.bold,magenta.bold\" -n \"SERVER,CLIENT\" \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "tsx watch server/src/index.ts",
     "dev:client": "vite",
     "build:server": "tsc -p tsconfig.server.json",
@@ -12,17 +13,19 @@
     "stress-test": "tsx server/src/stressTest.ts"
   },
   "dependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.4",
+    "concurrently": "^10.0.5",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "lucide-react": "^0.475.0",
+    "mongoose": "^9.9.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "ws": "^8.18.0",
-    "@types/node": "^22.13.4",
-    "@types/ws": "^8.5.14",
-    "@types/express": "^5.0.0",
-    "@types/cors": "^2.8.17",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
     "typescript": "^5.7.3"
   },
   "devDependencies": {

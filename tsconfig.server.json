@@ -9,7 +9,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node", "ws"]
+    "types": ["node"]
   },
   "include": ["server/src/**/*", "shared/**/*"],
   "exclude": ["server/src/stressTest.ts"]

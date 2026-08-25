@@ -1,24 +1,25 @@
 import express from 'express';
 import { createServer } from 'http';
-import { WebSocketServer } from 'ws';
+import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { SERVER_CONFIG, GAME_TITLE, GAME_VERSION } from '../../shared/constants.js';
 import { GameServer } from './GameServer.js';
+import { connectMongoDB, loadMatchHistoryFromDB } from './db.js';
 
 dotenv.config();
 
 const app = express();
 
-// ── CORS: allow Vercel frontend (or * for dev/testing) ──────────
 const corsOrigin = process.env.CORS_ORIGIN || '*';
 app.use(cors({
-  origin: corsOrigin === '*' ? '*' : corsOrigin.split(',').map((o) => o.trim()),
+  origin: corsOrigin === '*' ? true : corsOrigin.split(',').map((o) => o.trim()),
   methods: ['GET', 'POST', 'OPTIONS'],
+  credentials: true,
 }));
 app.use(express.json());
 
-// ── Health check (used by Render health checks + keep-alive) ────
+// Health check endpoint
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -29,39 +30,54 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// ── Prevent Render free-tier cold-start by self-pinging ─────────
-// Render's free tier sleeps after 15 min of inactivity.
-// Self-ping every 10 minutes keeps it awake during the tournament.
-const SELF_PING_MS = 10 * 60 * 1000; // 10 minutes
-const selfUrl = process.env.RENDER_EXTERNAL_URL || null;
-if (selfUrl) {
-  setInterval(() => {
-    fetch(`${selfUrl}/health`).catch(() => { /* ignore */ });
-  }, SELF_PING_MS);
-}
-
 const httpServer = createServer(app);
-const wss = new WebSocketServer({ server: httpServer });
 
-const gameServer = new GameServer(wss);
+// Socket.IO server with optimised settings for low-latency multiplayer
+const io = new Server(httpServer, {
+  cors: {
+    origin: corsOrigin === '*' ? '*' : corsOrigin.split(',').map((o) => o.trim()),
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+  // Prefer WebSocket, fall back to polling for corporate/college networks
+  transports: ['websocket', 'polling'],
+  pingInterval: 10000,    // Heartbeat every 10s
+  pingTimeout: 5000,      // Disconnect after 5s no response
+  maxHttpBufferSize: 1e5, // 100 KB max message
+  connectTimeout: 8000,
+});
+
+const gameServer = new GameServer(io);
 
 const port = process.env.PORT ? parseInt(process.env.PORT) : SERVER_CONFIG.PORT;
-httpServer.listen(port, () => {
+
+httpServer.listen(port, async () => {
   console.log(`=========================================`);
   console.log(`⚡ ${GAME_TITLE} ${GAME_VERSION} Server Running`);
-  console.log(`📡 WebSocket Port: ${port}`);
+  console.log(`📡 Socket.IO Port: ${port}`);
   console.log(`🌐 CORS Origin: ${corsOrigin}`);
-  console.log(`🔐 Admin Secret: ${process.env.ADMIN_SECRET ? 'SET (from env)' : 'WARNING: using fallback!'}`);
+  console.log(`🔐 Admin Secret: ${process.env.ADMIN_SECRET ? 'SET (from env)' : 'using dev fallback'}`);
   console.log(`⚔️  Max Capacity: ${SERVER_CONFIG.MAX_TOTAL_PLAYERS} Players`);
   console.log(`🏆  Tournament: ${SERVER_CONFIG.MAX_TEAMS} Squads × ${SERVER_CONFIG.MAX_PLAYERS_PER_TEAM} Players`);
+
+  const connected = await connectMongoDB();
+  if (connected) {
+    const history = await loadMatchHistoryFromDB();
+    if (history.length > 0) {
+      gameServer.match.matchHistory = history;
+      console.log(`📜 Restored ${history.length} match records from MongoDB Atlas`);
+    }
+  }
   console.log(`=========================================`);
 });
 
-// ── Graceful shutdown ─────────────────────────────────────────
+// Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received — shutting down gracefully');
+  io.close();
   httpServer.close(() => process.exit(0));
 });
 process.on('SIGINT', () => {
+  io.close();
   httpServer.close(() => process.exit(0));
 });

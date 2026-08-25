@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GameStateSnapshot, TeamInfo, KillEvent } from '../../../shared/types.js';
 import { Minimap } from './Minimap.js';
-import { Clock, ShieldAlert, Skull, Eye, ChevronLeft, ChevronRight, Wifi, Gauge } from 'lucide-react';
+import { Clock, ShieldAlert, Skull, Eye, ChevronLeft, ChevronRight, Wifi, Gauge, Sliders } from 'lucide-react';
 import { UserSettings } from './SettingsModal.js';
 
 interface GameHUDProps {
@@ -13,6 +13,7 @@ interface GameHUDProps {
   spectateTargetId?: string;
   onSelectSpectateTarget?: (targetId: string) => void;
   fps?: number;
+  onOpenSettings?: () => void;
 }
 
 interface ClaimToast {
@@ -47,6 +48,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   spectateTargetId,
   onSelectSpectateTarget,
   fps,
+  onOpenSettings,
 }) => {
   const myPlayer = gameState.players.find((p) => p.id === myPlayerId);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 600);
@@ -60,16 +62,6 @@ export const GameHUD: React.FC<GameHUDProps> = ({
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
-
-  // Detect new territory claims by watching team territory changes
-  useEffect(() => {
-    if (!myPlayer?.isAlive) return;
-    // We detect claims via score jump as a proxy (server sends TERRITORY_CLAIM_ANIMATION separately)
-    const currentScore = myPlayer?.score || 0;
-    if (currentScore > 0) {
-      // Handled via App.tsx event passing
-    }
-  }, [myPlayer?.score]);
 
   // Kill streak detection
   useEffect(() => {
@@ -91,14 +83,13 @@ export const GameHUD: React.FC<GameHUDProps> = ({
     prevKillsRef.current = myKills;
   }, [myPlayer?.kills]);
 
-  // Kill feed diff for territory claim-like announcements
+  // Kill feed announcements
   useEffect(() => {
     const kills = gameState.recentKills;
     const prev = prevKillFeedRef.current;
     if (kills.length > prev.length) {
       const newKill = kills[0];
       if (newKill && newKill.killerId !== 'WORLD' && newKill.killerTeam === myPlayer?.teamId) {
-        // A teammate got a kill
         const msg = `${newKill.reason === 'TRAIL_CUT' ? '🔪 Trail Cut' : '💥 Eliminated'}: ${newKill.victimName}`;
         const myTeam = gameState.availableTeams?.find((t) => t.id === myPlayer?.teamId);
         const toast: ClaimToast = {
@@ -141,7 +132,6 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const spectatedPlayer = gameState.players.find((p) => p.id === spectateTargetId) || alivePlayers[0];
   const myTeamInfo = getTeamInfo(myPlayer?.teamId || null);
 
-  // Zone phase label
   const zonePhaseLabel = (() => {
     const phase = gameState.zone?.shrinkPhase || 0;
     if (phase === 0) return 'PHASE 1 (100%)';
@@ -171,21 +161,24 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       {gameState.isPaused && (
         <div style={{
           position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-          background: 'rgba(255, 214, 0, 0.95)', color: '#060810', padding: '12px 40px', borderRadius: '8px',
-          fontSize: '22px', fontWeight: 900, letterSpacing: '3px', zIndex: 100, boxShadow: '0 0 40px rgba(255,214,0,0.6)',
+          background: 'rgba(255, 214, 0, 0.95)', color: '#060810', padding: '12px 30px', borderRadius: '8px',
+          fontSize: isMobile ? '15px' : '22px', fontWeight: 900, letterSpacing: '2px', zIndex: 100,
+          boxShadow: '0 0 40px rgba(255,214,0,0.6)', textAlign: 'center', width: '90%', maxWidth: '500px',
         }}>
-          ⏸ MATCH PAUSED — WAITING FOR ORGANIZER
+          ⏸ MATCH PAUSED
         </div>
       )}
 
-      {/* ═══ TOP CENTER: Timer + Zone Phase ═══ */}
+      {/* ═══ TOP CENTER: Timer + Zone Phase + Settings ═══ */}
       <div style={{
         position: 'absolute', top: isMobile ? '8px' : '16px', left: '50%', transform: 'translateX(-50%)',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', zIndex: 10,
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', zIndex: 60,
+        pointerEvents: 'auto',
       }}>
         <div className="glass-panel" style={{
-          padding: isMobile ? '4px 12px' : '6px 20px', display: 'flex', alignItems: 'center', gap: '8px',
-          borderColor: gameState.timer < 60 ? 'rgba(255, 42, 95, 0.4)' : undefined,
+          padding: isMobile ? '4px 10px' : '6px 16px', display: 'flex', alignItems: 'center', gap: '8px',
+          borderColor: gameState.timer < 60 ? 'rgba(255, 42, 95, 0.5)' : undefined,
+          background: 'rgba(5, 8, 16, 0.85)', backdropFilter: 'blur(8px)',
         }}>
           <Clock size={isMobile ? 14 : 18} color={gameState.timer < 60 ? '#ff2a5f' : '#00d2ff'} />
           <span style={{
@@ -195,9 +188,36 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             {formatTime(gameState.timer)}
           </span>
           {gameState.matchId && (
-            <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: '4px' }}>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: '2px' }}>
               {gameState.matchId}
             </span>
+          )}
+
+          {/* Clean Prominent Settings Button */}
+          {onOpenSettings && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="glass-button"
+              style={{
+                padding: isMobile ? '3px 7px' : '4px 10px',
+                fontSize: '11px',
+                marginLeft: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                background: 'rgba(0, 210, 255, 0.15)',
+                borderColor: '#00d2ff',
+                color: '#ffffff',
+                cursor: 'pointer',
+              }}
+              title="Game Settings"
+            >
+              <Sliders size={isMobile ? 12 : 14} color="#00d2ff" />
+              <span style={{ fontSize: isMobile ? '10px' : '11px', fontWeight: 700 }}>
+                {isMobile ? 'SET' : 'SETTINGS'}
+              </span>
+            </button>
           )}
         </div>
 
@@ -219,9 +239,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       {/* ═══ TOP LEFT: Squad Dominance Panel ═══ */}
       <div className="glass-panel" style={{
         position: 'absolute', top: isMobile ? '8px' : '16px', left: isMobile ? '8px' : '16px',
-        padding: isMobile ? '6px 10px' : '12px 16px', minWidth: isMobile ? '110px' : '220px',
-        maxWidth: isMobile ? '130px' : '250px', display: 'flex', flexDirection: 'column',
-        gap: isMobile ? '4px' : '8px', zIndex: 10,
+        padding: isMobile ? '6px 8px' : '12px 16px', minWidth: isMobile ? '100px' : '220px',
+        maxWidth: isMobile ? '125px' : '250px', display: 'flex', flexDirection: 'column',
+        gap: isMobile ? '3px' : '8px', zIndex: 10,
+        maxHeight: isMobile ? '130px' : 'none', overflowY: isMobile ? 'auto' : 'visible',
       }}>
         <div style={{ fontSize: isMobile ? '9px' : '11px', fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '1px' }}>
           {isMobile ? 'SQUADS' : `SQUADS · ${alivePlayers.length} ALIVE`}
@@ -236,8 +257,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               fontSize: isMobile ? '10px' : '13px', opacity: t.isEliminated ? 0.3 : 1, gap: '4px',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }}>
-                <span style={{ fontSize: isMobile ? '12px' : '14px', flexShrink: 0 }}>{teamInfo.symbol || '🛡️'}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '3px', minWidth: 0 }}>
+                <span style={{ fontSize: isMobile ? '11px' : '14px', flexShrink: 0 }}>{teamInfo.symbol || '🛡️'}</span>
                 <span style={{
                   fontWeight: isMyTeam ? 800 : 600, color: isMyTeam ? '#ffffff' : '#cfd8e3',
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -250,7 +271,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
                 {!isMobile && <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{t.territoryPercentage}%</span>}
                 {t.isEliminated ? (
-                  <span style={{ fontSize: isMobile ? '9px' : '11px', color: '#ff2a5f', fontWeight: 700 }}>
+                  <span style={{ fontSize: isMobile ? '8px' : '11px', color: '#ff2a5f', fontWeight: 700 }}>
                     {isMobile ? '✗' : 'ELIM'}
                   </span>
                 ) : (
@@ -296,7 +317,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           position: 'absolute', top: '35%', left: '50%', transform: 'translateX(-50%)',
           background: 'rgba(0,0,0,0.85)', border: `2px solid ${killStreakToast.color}`,
           boxShadow: `0 0 30px ${killStreakToast.color}`, borderRadius: '10px',
-          padding: '10px 28px', fontSize: isMobile ? '18px' : '24px', fontWeight: 900,
+          padding: '10px 24px', fontSize: isMobile ? '16px' : '24px', fontWeight: 900,
           color: killStreakToast.color, whiteSpace: 'nowrap', zIndex: 40,
           animation: 'fadeIn 0.2s ease', textAlign: 'center', letterSpacing: '1px',
         }}>
@@ -306,14 +327,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
       {/* ═══ TERRITORY CLAIM TOASTS ═══ */}
       <div style={{
-        position: 'absolute', right: isMobile ? '8px' : '20px', bottom: isMobile ? '160px' : '100px',
+        position: 'absolute', right: isMobile ? '8px' : '20px', bottom: isMobile ? '170px' : '100px',
         display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end', zIndex: 30,
         pointerEvents: 'none',
       }}>
         {claimToasts.map((toast) => (
           <div key={toast.id} style={{
             background: 'rgba(0,0,0,0.75)', border: `1px solid ${toast.color}`,
-            borderRadius: '8px', padding: '5px 12px', fontSize: '12px',
+            borderRadius: '8px', padding: '4px 10px', fontSize: '11px',
             fontWeight: 700, color: toast.color, animation: 'fadeIn 0.2s ease', whiteSpace: 'nowrap',
           }}>
             {toast.message}
@@ -322,14 +343,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       </div>
 
       {/* ═══ MINIMAP ═══ */}
-      <div style={{ position: 'absolute', bottom: isMobile ? '130px' : '16px', left: isMobile ? '8px' : '16px', zIndex: 10 }}>
+      <div style={{ position: 'absolute', bottom: isMobile ? '20px' : '16px', left: isMobile ? '8px' : '16px', zIndex: 10 }}>
         <Minimap gameState={gameState} grid={grid} myPlayerId={myPlayerId} />
       </div>
 
-      {/* ═══ FPS / PING overlay ═══ */}
+      {/* ═══ FPS / PING OVERLAY ═══ */}
       {settings?.showFpsPing && (
         <div style={{
-          position: 'absolute', bottom: isMobile ? '130px' : '16px', right: '16px',
+          position: 'absolute', bottom: isMobile ? '20px' : '16px', right: isMobile ? '180px' : '16px',
           display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', zIndex: 10,
         }}>
           {fps !== undefined && (
@@ -350,28 +371,28 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       {/* ═══ SPECTATOR SWITCHER ═══ */}
       {isSpectating && spectatedPlayer && (
         <div className="glass-panel" style={{
-          position: 'absolute', bottom: isMobile ? '80px' : '20px', left: '50%', transform: 'translateX(-50%)',
-          padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '12px',
+          position: 'absolute', bottom: isMobile ? '20px' : '20px', left: '50%', transform: 'translateX(-50%)',
+          padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '10px',
           pointerEvents: 'auto', zIndex: 50, boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
         }}>
-          <button type="button" onClick={handlePrevSpectate} className="glass-button" style={{ padding: '6px', borderRadius: '50%' }}>
-            <ChevronLeft size={16} />
+          <button type="button" onClick={handlePrevSpectate} className="glass-button" style={{ padding: '5px', borderRadius: '50%' }}>
+            <ChevronLeft size={14} />
           </button>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Eye size={16} color="#00d2ff" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Eye size={14} color="#00d2ff" />
             <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              <div style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
                 SPECTATING · {alivePlayers.length} ALIVE
               </div>
-              <div style={{ fontSize: '14px', fontWeight: 800, color: getTeamInfo(spectatedPlayer.teamId).color }}>
+              <div style={{ fontSize: '12px', fontWeight: 800, color: getTeamInfo(spectatedPlayer.teamId).color }}>
                 {spectatedPlayer.name} ({getTeamInfo(spectatedPlayer.teamId).name})
               </div>
             </div>
           </div>
 
-          <button type="button" onClick={handleNextSpectate} className="glass-button" style={{ padding: '6px', borderRadius: '50%' }}>
-            <ChevronRight size={16} />
+          <button type="button" onClick={handleNextSpectate} className="glass-button" style={{ padding: '5px', borderRadius: '50%' }}>
+            <ChevronRight size={14} />
           </button>
         </div>
       )}
@@ -398,15 +419,15 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       {/* ═══ ZONE DANGER BANNER ═══ */}
       {isZoneWarning && (
         <div style={{
-          position: 'absolute', bottom: isMobile ? '170px' : '80px', left: '50%', transform: 'translateX(-50%)',
+          position: 'absolute', bottom: isMobile ? '180px' : '80px', left: '50%', transform: 'translateX(-50%)',
           background: 'rgba(255, 42, 95, 0.9)', color: '#ffffff',
-          padding: isMobile ? '6px 14px' : '8px 24px', borderRadius: '8px',
-          fontSize: isMobile ? '11px' : '14px', fontWeight: 800,
-          display: 'flex', alignItems: 'center', gap: '8px',
+          padding: isMobile ? '5px 12px' : '8px 24px', borderRadius: '8px',
+          fontSize: isMobile ? '10px' : '14px', fontWeight: 800,
+          display: 'flex', alignItems: 'center', gap: '6px',
           boxShadow: '0 0 20px rgba(255, 42, 95, 0.8)', animation: 'neon-pulse 0.8s infinite',
           whiteSpace: 'nowrap', zIndex: 20,
         }}>
-          <ShieldAlert size={isMobile ? 14 : 18} />
+          <ShieldAlert size={isMobile ? 13 : 18} />
           {isMobile ? 'OUTSIDE SAFE ZONE!' : 'OUTSIDE SAFE ZONE! RETURN IMMEDIATELY!'}
         </div>
       )}

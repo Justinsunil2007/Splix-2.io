@@ -1,11 +1,11 @@
 import { Direction, PlayerPublicState, Position, TeamId } from '../../shared/types.js';
-import { WebSocket } from 'ws';
+import type { Socket } from 'socket.io';
 
 export class Player {
   public readonly id: string;
   public name: string;
   public teamId: TeamId;
-  public socket: WebSocket | null = null;
+  public socket: Socket | null = null;
 
   public x: number = 0;
   public y: number = 0;
@@ -20,16 +20,14 @@ export class Player {
   public isInSafeZone: boolean = true;
   public outOfBoundsTicks: number = 0;
 
-  // Track if player is currently on friendly territory
   public isOnOwnTerritory: boolean = true;
   public lastMoveTime: number = Date.now();
   public ping: number = 25;
   public isBot: boolean = false;
 
-  // Reconnection tracking
   public disconnectedAt: number | null = null;
 
-  constructor(id: string, name: string, teamId: TeamId, socket: WebSocket | null = null) {
+  constructor(id: string, name: string, teamId: TeamId, socket: Socket | null = null) {
     this.id = id;
     this.name = name;
     this.teamId = teamId;
@@ -49,7 +47,6 @@ export class Player {
   }
 
   public queueDirection(newDir: Direction) {
-    // Prevent 180-degree immediate reversal into oneself
     if (
       (this.direction === 'UP' && newDir === 'DOWN') ||
       (this.direction === 'DOWN' && newDir === 'UP') ||
@@ -66,18 +63,10 @@ export class Player {
     this.direction = this.nextDirection;
 
     switch (this.direction) {
-      case 'UP':
-        this.y -= 1;
-        break;
-      case 'DOWN':
-        this.y += 1;
-        break;
-      case 'LEFT':
-        this.x -= 1;
-        break;
-      case 'RIGHT':
-        this.x += 1;
-        break;
+      case 'UP':    this.y -= 1; break;
+      case 'DOWN':  this.y += 1; break;
+      case 'LEFT':  this.x -= 1; break;
+      case 'RIGHT': this.x += 1; break;
     }
   }
 

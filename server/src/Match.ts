@@ -15,6 +15,7 @@ import {
 import { GridMap } from './Grid.js';
 import { Player } from './Player.js';
 import { BattleZone } from './Zone.js';
+import { saveMatchRecordToDB } from './db.js';
 
 export class Match {
   public status: MatchStatus = 'LOBBY';
@@ -289,7 +290,15 @@ export class Match {
   public endMatch(winner: TeamId | null = null) {
     this.status = 'MATCH_END';
     this.winnerTeam = winner || this.calculateHighestScoringTeam();
-    const teamRankings = this.getTeamStates();
+
+    // Sort team rankings: winner first, then by territory + kills
+    const teamRankings = this.getTeamStates().sort((a, b) => {
+      if (a.id === this.winnerTeam) return -1;
+      if (b.id === this.winnerTeam) return 1;
+      const scoreA = a.territoryCount + a.kills * 100;
+      const scoreB = b.territoryCount + b.kills * 100;
+      return scoreB - scoreA;
+    });
 
     const winnerInfo = this.customTeams.get(this.winnerTeam || '');
     const historyRecord: MatchHistoryRecord = {
@@ -302,6 +311,7 @@ export class Match {
     };
 
     this.matchHistory.unshift(historyRecord);
+    saveMatchRecordToDB(historyRecord);
     this.matchCount++;
     this.logEvent('MATCH_END', `Match ${this.matchId} ended. Winner: ${historyRecord.winnerTeamName}`);
 
@@ -310,6 +320,12 @@ export class Match {
       winnerTeam: this.winnerTeam,
       teamRankings,
       historyRecord,
+    });
+
+    // Also update and broadcast tournament standings immediately
+    this.onBroadcastState({
+      type: 'TOURNAMENT_STANDINGS',
+      standings: this.getTournamentStandings(),
     });
   }
 
@@ -537,9 +553,11 @@ export class Match {
       }
     }
 
-    if (livingTeams.size <= 1 && teamsWithPlayers.size > 1 && (this.status === 'ACTIVE' || this.status === 'ZONE_SHRINKING' || this.status === 'ENDGAME')) {
-      const winner = Array.from(livingTeams)[0] || null;
-      this.endMatch(winner);
+    if (this.status === 'ACTIVE' || this.status === 'ZONE_SHRINKING' || this.status === 'ENDGAME') {
+      if (livingTeams.size === 0 || (livingTeams.size === 1 && teamsWithPlayers.size >= 1)) {
+        const winner = Array.from(livingTeams)[0] || this.calculateHighestScoringTeam();
+        this.endMatch(winner);
+      }
     }
   }
 

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { io, Socket } from 'socket.io-client';
 import {
   ClientMessage,
   Direction,
@@ -22,20 +23,40 @@ import { ScoreboardModal } from './components/ScoreboardModal.js';
 import { SoundManager } from './audio/SoundManager.js';
 import { InputManager } from './game/InputManager.js';
 
-const getWsUrl = () => {
-  if (import.meta.env.VITE_GAME_SERVER_URL) {
-    return import.meta.env.VITE_GAME_SERVER_URL;
+// Resolve the server URL — VITE_SERVER_URL or auto-detect
+const getServerUrl = () => {
+  if (import.meta.env.VITE_SERVER_URL) {
+    return import.meta.env.VITE_SERVER_URL as string;
   }
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.hostname}:8080`;
+  // In development: connect to local server on port 8080
+  return `${window.location.protocol}//${window.location.hostname}:8080`;
 };
 
+// Create Socket.IO connection once (module scope — survives hot reload)
+let globalSocket: Socket | null = null;
+
+const getSocket = (): Socket => {
+  if (!globalSocket || globalSocket.disconnected) {
+    globalSocket = io(getServerUrl(), {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 8000,
+      timeout: 10000,
+      autoConnect: true,
+    });
+  }
+  return globalSocket;
+};
+
+const SERVER_INTRO_MS = 3200;
+
 export const App: React.FC = () => {
-  const [socket, setSocket] = useState<WebSocket | null>(null);
+  const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Player State
   const [myPlayerId, setMyPlayerId] = useState<string>('');
@@ -74,14 +95,11 @@ export const App: React.FC = () => {
 
   // FPS tracking
   const [fps, setFps] = useState<number>(60);
-  const fpsRef = useRef<number>(0);
-  const fpsTimerRef = useRef<number>(0);
 
   // Touch device check
   const [isTouchDevice, setIsTouchDevice] = useState<boolean>(false);
 
   const inputManagerRef = useRef<InputManager | null>(null);
-  const socketRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);
@@ -107,7 +125,7 @@ export const App: React.FC = () => {
     return () => cancelAnimationFrame(rafId);
   }, []);
 
-  // Set default selected team if available and none selected yet
+  // Default selected team when available
   useEffect(() => {
     if (gameState?.availableTeams && gameState.availableTeams.length > 0 && !selectedTeam) {
       setSelectedTeam(gameState.availableTeams[0].id);
@@ -119,70 +137,161 @@ export const App: React.FC = () => {
     SoundManager.setVolume(settings.soundVolume);
   }, [settings.soundVolume]);
 
-  // Connect WebSocket with auto-reconnect
+  // ── Socket.IO Connection ─────────────────────────────────────
   useEffect(() => {
-    let destroyed = false;
-    let retryCount = 0;
-    const MAX_RETRIES = 20;
-    const BASE_DELAY_MS = 1500;
+    const socket = getSocket();
+    socketRef.current = socket;
 
-    const connect = () => {
-      if (destroyed) return;
-      const wsUrl = getWsUrl();
-      const ws = new WebSocket(wsUrl);
-      socketRef.current = ws;
+    // Connection events
+    socket.on('connect', () => {
+      setIsConnected(true);
+      setIsReconnecting(false);
+      setErrorMsg(null);
 
-      ws.onopen = () => {
-        setIsConnected(true);
-        setIsReconnecting(false);
-        setErrorMsg(null);
-        retryCount = 0;
-        setSocket(ws);
-        // Re-join lobby if we had already joined before disconnect
-        if (hasJoined && playerName) {
-          const msg: ClientMessage = { type: 'JOIN_LOBBY', name: playerName, teamId: selectedTeam || undefined };
-          ws.send(JSON.stringify(msg));
-        }
-      };
+      // Re-join lobby on reconnect if we had previously joined
+      if (hasJoined && playerName) {
+        socket.emit('JOIN_LOBBY', { name: playerName, teamId: selectedTeam || undefined });
+      }
+    });
 
-      ws.onmessage = (event) => {
-        try {
-          const msg: ServerMessage = JSON.parse(event.data);
-          handleServerMessage(msg);
-        } catch (e) {
-          console.error('Failed to parse server message', e);
-        }
-      };
+    socket.on('disconnect', (reason) => {
+      setIsConnected(false);
+      if (reason !== 'io client disconnect') {
+        setIsReconnecting(true);
+        setErrorMsg(`Connection lost — reconnecting...`);
+      }
+    });
 
-      ws.onclose = () => {
-        setIsConnected(false);
-        setSocket(null);
-        socketRef.current = null;
-        if (destroyed) return;
-        if (retryCount < MAX_RETRIES) {
-          retryCount++;
-          const delay = Math.min(BASE_DELAY_MS * retryCount, 15000);
-          setIsReconnecting(true);
-          setErrorMsg(`Connection lost — reconnecting... (attempt ${retryCount})`);
-          reconnectTimerRef.current = setTimeout(connect, delay);
-        } else {
-          setIsReconnecting(false);
-          setErrorMsg('Unable to reconnect. Please refresh the page.');
-        }
-      };
+    socket.on('connect_error', (err) => {
+      setIsConnected(false);
+      setIsReconnecting(true);
+      setErrorMsg(`Connecting to server...`);
+    });
 
-      ws.onerror = () => {
-        // onerror always fires before onclose — let onclose handle retry
-        setIsConnected(false);
-      };
-    };
+    socket.io.on('reconnect', () => {
+      setIsConnected(true);
+      setIsReconnecting(false);
+      setErrorMsg(null);
+    });
 
-    connect();
+    socket.io.on('reconnect_attempt', (attempt) => {
+      setErrorMsg(`Reconnecting... (attempt ${attempt})`);
+    });
+
+    // ── Game Message Handlers ──────────────────────────────────
+    socket.on('INIT_STATE', (msg: any) => {
+      setMyPlayerId(msg.playerId);
+      setGrid(msg.grid);
+      setGameState(msg.state);
+    });
+
+    socket.on('TICK_UPDATE', (msg: any) => {
+      setGameState(msg.state);
+      if (msg.territoryDiffs && msg.territoryDiffs.length > 0) {
+        setGrid((prevGrid) => {
+          if (prevGrid.length === 0) return prevGrid;
+          const newGrid = prevGrid.map((row: (string | null)[]) => [...row]);
+          for (const diff of msg.territoryDiffs) {
+            for (const [x, y] of diff.tiles) {
+              if (newGrid[y] && newGrid[y][x] !== undefined) {
+                newGrid[y][x] = diff.teamId;
+              }
+            }
+          }
+          return newGrid;
+        });
+      }
+    });
+
+    socket.on('TERRITORY_FULL_SYNC', (msg: any) => {
+      setGrid(msg.grid);
+    });
+
+    socket.on('MATCH_INTRO', (msg: any) => {
+      setIntroTeams(msg.teams);
+      setIntroMatchId(msg.matchId);
+      setIsInIntro(true);
+      setTimeout(() => setIsInIntro(false), SERVER_INTRO_MS);
+    });
+
+    socket.on('MATCH_COUNTDOWN', (msg: any) => {
+      setIsInIntro(false);
+      setCountdownSeconds(msg.seconds);
+      SoundManager.playCountdownTick(msg.seconds === 1);
+    });
+
+    socket.on('MATCH_STARTED', () => {
+      setCountdownSeconds(0);
+      setIsInIntro(false);
+      SoundManager.playCountdownTick(true);
+    });
+
+    socket.on('KILL_FEED', () => {
+      SoundManager.playDeath();
+    });
+
+    socket.on('TEAM_ELIMINATED', () => {
+      SoundManager.playTeamEliminated();
+    });
+
+    socket.on('TERRITORY_CLAIM_ANIMATION', (msg: any) => {
+      const isLarge = msg.tilesCount >= 20;
+      SoundManager.playCapture(isLarge);
+    });
+
+    socket.on('MATCH_ENDED', (msg: any) => {
+      setCountdownSeconds(0);
+      setIsInIntro(false);
+      setIsReady(false);
+      SoundManager.playVictory();
+      if (msg.historyRecord) {
+        setMatchHistory((prev) => [msg.historyRecord, ...prev].slice(0, 20));
+      }
+    });
+
+    socket.on('TOURNAMENT_STANDINGS', (msg: any) => {
+      setStandings(msg.standings);
+    });
+
+    socket.on('MATCH_HISTORY', (msg: any) => {
+      setMatchHistory(msg.records);
+    });
+
+    socket.on('ADMIN_AUTH_RESULT', (msg: any) => {
+      if (msg.success) {
+        setIsAdmin(true);
+        setAdminToken(msg.message);
+        setAuthError(null);
+      } else {
+        setAuthError(msg.message);
+        setIsAdmin(false);
+      }
+    });
+
+    socket.on('ERROR_MESSAGE', (msg: any) => {
+      setErrorMsg(msg.message);
+      setTimeout(() => setErrorMsg(null), 4000);
+    });
 
     return () => {
-      destroyed = true;
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      socketRef.current?.close();
+      // Remove all listeners but keep socket connected (so reconnect works)
+      socket.off('connect');
+      socket.off('disconnect');
+      socket.off('connect_error');
+      socket.off('INIT_STATE');
+      socket.off('TICK_UPDATE');
+      socket.off('TERRITORY_FULL_SYNC');
+      socket.off('MATCH_INTRO');
+      socket.off('MATCH_COUNTDOWN');
+      socket.off('MATCH_STARTED');
+      socket.off('KILL_FEED');
+      socket.off('TEAM_ELIMINATED');
+      socket.off('TERRITORY_CLAIM_ANIMATION');
+      socket.off('MATCH_ENDED');
+      socket.off('TOURNAMENT_STANDINGS');
+      socket.off('MATCH_HISTORY');
+      socket.off('ADMIN_AUTH_RESULT');
+      socket.off('ERROR_MESSAGE');
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -190,10 +299,9 @@ export const App: React.FC = () => {
   // Setup Input Manager
   useEffect(() => {
     inputManagerRef.current = new InputManager((direction: Direction) => {
-      const ws = socketRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        const msg: ClientMessage = { type: 'SET_DIRECTION', direction };
-        ws.send(JSON.stringify(msg));
+      const socket = socketRef.current;
+      if (socket && socket.connected) {
+        socket.emit('SET_DIRECTION', { direction });
       }
     });
 
@@ -202,179 +310,59 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  const handleServerMessage = useCallback((msg: ServerMessage) => {
-    switch (msg.type) {
-      case 'INIT_STATE': {
-        setMyPlayerId(msg.playerId);
-        setGrid(msg.grid);
-        setGameState(msg.state);
-        break;
-      }
-
-      case 'TICK_UPDATE': {
-        setGameState(msg.state);
-        if (msg.territoryDiffs && msg.territoryDiffs.length > 0) {
-          setGrid((prevGrid) => {
-            if (prevGrid.length === 0) return prevGrid;
-            const newGrid = prevGrid.map((row) => [...row]);
-            for (const diff of msg.territoryDiffs!) {
-              for (const [x, y] of diff.tiles) {
-                if (newGrid[y] && newGrid[y][x] !== undefined) {
-                  newGrid[y][x] = diff.teamId;
-                }
-              }
-            }
-            return newGrid;
-          });
-        }
-        break;
-      }
-
-      case 'TERRITORY_FULL_SYNC': {
-        setGrid(msg.grid);
-        break;
-      }
-
-      case 'MATCH_INTRO': {
-        setIntroTeams(msg.teams);
-        setIntroMatchId(msg.matchId);
-        setIsInIntro(true);
-        // Intro clears after 3 seconds (handled server-side)
-        setTimeout(() => setIsInIntro(false), SERVER_INTRO_MS);
-        break;
-      }
-
-      case 'MATCH_COUNTDOWN': {
-        setIsInIntro(false);
-        setCountdownSeconds(msg.seconds);
-        SoundManager.playCountdownTick(msg.seconds === 1);
-        break;
-      }
-
-      case 'MATCH_STARTED': {
-        setCountdownSeconds(0);
-        setIsInIntro(false);
-        SoundManager.playCountdownTick(true);
-        break;
-      }
-
-      case 'MATCH_PAUSED': {
-        // Game state update handles visual via isPaused flag
-        break;
-      }
-
-      case 'MATCH_RESUMED': {
-        break;
-      }
-
-      case 'KILL_FEED': {
-        SoundManager.playDeath();
-        break;
-      }
-
-      case 'TEAM_ELIMINATED': {
-        SoundManager.playTeamEliminated();
-        break;
-      }
-
-      case 'TERRITORY_CLAIM_ANIMATION': {
-        // Territory claim notif handled within GameHUD via score changes
-        const isLarge = msg.tilesCount >= 20;
-        SoundManager.playCapture(isLarge);
-        break;
-      }
-
-      case 'MATCH_ENDED': {
-        setCountdownSeconds(0);
-        setIsInIntro(false);
-        setIsReady(false);
-        SoundManager.playVictory();
-        if (msg.historyRecord) {
-          setMatchHistory((prev) => [msg.historyRecord, ...prev].slice(0, 20));
-        }
-        break;
-      }
-
-      case 'TOURNAMENT_STANDINGS': {
-        setStandings(msg.standings);
-        break;
-      }
-
-      case 'MATCH_HISTORY': {
-        setMatchHistory(msg.records);
-        break;
-      }
-
-      case 'ADMIN_AUTH_RESULT': {
-        if (msg.success) {
-          setIsAdmin(true);
-          setAdminToken(msg.message); // Server returns session token in message field
-          setAuthError(null);
-        } else {
-          setAuthError(msg.message);
-          setIsAdmin(false);
-        }
-        break;
-      }
-
-      case 'ERROR_MESSAGE': {
-        setErrorMsg(msg.message);
-        setTimeout(() => setErrorMsg(null), 4000);
-        break;
-      }
-    }
-  }, []);
-
-  const sendMsg = useCallback((msg: ClientMessage) => {
-    const ws = socketRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(msg));
+  const sendMsg = useCallback((type: string, payload?: Record<string, any>) => {
+    const socket = socketRef.current;
+    if (socket && socket.connected) {
+      socket.emit(type, payload || {});
     }
   }, []);
 
   const handleJoin = () => {
-    sendMsg({ type: 'JOIN_LOBBY', name: playerName, teamId: selectedTeam || undefined });
+    sendMsg('JOIN_LOBBY', { name: playerName, teamId: selectedTeam || undefined });
     setHasJoined(true);
     SoundManager.playJoin();
   };
 
   const handleCreateTeam = (teamName: string, colorIndex: number, symbol?: string) => {
-    sendMsg({ type: 'CREATE_TEAM', name: teamName, colorIndex, symbol });
+    // If player hasn't joined yet, they'll be auto-joined on the server side
+    sendMsg('CREATE_TEAM', { name: teamName, colorIndex, symbol });
+    // Mark as joined so the UI updates
+    setHasJoined(true);
     SoundManager.playReady();
   };
 
   const handleTeamChange = (teamId: string) => {
     setSelectedTeam(teamId);
     if (hasJoined) {
-      sendMsg({ type: 'SELECT_TEAM', teamId });
+      sendMsg('SELECT_TEAM', { teamId });
     }
   };
 
   const handleToggleReady = () => {
     const next = !isReady;
     setIsReady(next);
-    sendMsg({ type: 'TOGGLE_READY' });
+    sendMsg('TOGGLE_READY');
     if (next) SoundManager.playReady();
   };
 
   const handleAdminLogin = (token: string) => {
-    sendMsg({ type: 'ADMIN_LOGIN', token });
+    sendMsg('ADMIN_LOGIN', { token });
   };
 
   const handleAdminCommand = (
     command: 'START_MATCH' | 'PAUSE_MATCH' | 'RESUME_MATCH' | 'EMERGENCY_RESET' | 'END_MATCH' | 'FORCE_SHRINK' | 'KICK_PLAYER' | 'SIMULATE_BOTS' | 'CLEAR_BOTS' | 'CLEAR_HISTORY',
     targetId?: string
   ) => {
-    sendMsg({ type: 'ADMIN_COMMAND', command, targetId, token: adminToken });
+    sendMsg('ADMIN_COMMAND', { command, targetId, token: adminToken });
   };
 
   const handleJoystickDirection = useCallback((dir: Direction) => {
-    sendMsg({ type: 'SET_DIRECTION', direction: dir });
+    sendMsg('SET_DIRECTION', { direction: dir });
   }, [sendMsg]);
 
   const isLobbyState = !gameState || gameState.status === 'LOBBY' || gameState.status === 'WAITING' || gameState.status === 'MATCH_END';
 
-  // Observer mode: show full arena projector view
+  // Observer mode
   if (isObserverMode && gameState) {
     return (
       <ObserverView
@@ -396,8 +384,7 @@ export const App: React.FC = () => {
         WebkitOverflowScrolling: 'touch',
       }}
     >
-
-      {/* Global Error / Reconnecting Banner */}
+      {/* Connection status banner */}
       {(errorMsg || isReconnecting) && (
         <div style={{
           position: 'fixed', top: '12px', left: '50%', transform: 'translateX(-50%)',
@@ -405,14 +392,13 @@ export const App: React.FC = () => {
           color: '#fff', padding: '6px 16px', borderRadius: '8px',
           zIndex: 999, fontWeight: 700, fontSize: '13px',
           boxShadow: '0 4px 16px rgba(0,0,0,0.5)', width: 'max-content', maxWidth: 'calc(100vw - 32px)', textAlign: 'center',
-          animation: isReconnecting ? 'neon-pulse 1.5s infinite' : undefined,
           boxSizing: 'border-box',
         }}>
           {isReconnecting ? `⟳ ${errorMsg || 'Reconnecting...'}` : errorMsg}
         </div>
       )}
 
-      {/* Initial connecting indicator (first load) */}
+      {/* Initial connecting indicator */}
       {!isConnected && !isReconnecting && !errorMsg && (
         <div style={{
           position: 'fixed', top: '12px', left: '50%', transform: 'translateX(-50%)',
@@ -424,7 +410,7 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* Main Screen Switcher */}
+      {/* Main Screen */}
       {isLobbyState ? (
         <LobbyView
           playerName={playerName}
@@ -442,14 +428,10 @@ export const App: React.FC = () => {
           onOpenHowToPlay={() => setIsHowToPlayOpen(true)}
           onOpenScoreboard={() => setIsScoreboardOpen(true)}
           onStartObserverMode={() => setIsObserverMode(true)}
-          onStartPracticeMode={() => {
-            // Practice mode: show how to play
-            setIsHowToPlayOpen(true);
-          }}
+          onStartPracticeMode={() => setIsHowToPlayOpen(true)}
         />
       ) : (
         <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-          {/* Game Canvas */}
           <GameCanvas
             gameState={gameState!}
             grid={grid}
@@ -461,7 +443,6 @@ export const App: React.FC = () => {
             onAutoSpectateTargetChange={(tid) => setSpectateTargetId(tid)}
           />
 
-          {/* Game HUD */}
           <GameHUD
             gameState={gameState!}
             grid={grid}
@@ -471,25 +452,12 @@ export const App: React.FC = () => {
             spectateTargetId={spectateTargetId}
             onSelectSpectateTarget={(tid) => setSpectateTargetId(tid)}
             fps={settings.showFpsPing ? fps : undefined}
+            onOpenSettings={() => setIsSettingsOpen(true)}
           />
 
-          {/* Mobile Virtual Joystick */}
           {isTouchDevice && (
             <VirtualJoystick onDirectionChange={handleJoystickDirection} />
           )}
-
-          {/* In-game settings shortcut */}
-          <button
-            type="button"
-            onClick={() => setIsSettingsOpen(true)}
-            style={{
-              position: 'absolute', top: '16px', left: '50%', marginLeft: '-50px',
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              zIndex: 10, pointerEvents: 'auto', opacity: 0.4, fontSize: '12px', color: '#fff',
-            }}
-          >
-            ⚙ settings
-          </button>
         </div>
       )}
 
@@ -521,7 +489,7 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* Admin Panel Modal */}
+      {/* Admin Panel */}
       <AdminPanel
         isOpen={isAdminOpen}
         onClose={() => setIsAdminOpen(false)}
@@ -556,5 +524,3 @@ export const App: React.FC = () => {
     </div>
   );
 };
-
-const SERVER_INTRO_MS = 3200; // Should match server INTRO_SECONDS + buffer

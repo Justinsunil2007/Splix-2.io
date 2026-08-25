@@ -11,9 +11,10 @@ services:
       - key: NODE_ENV
         value: production
       - key: PORT
-        generateValue: false
         value: 8080
       - key: ADMIN_SECRET
-        sync: false   # Set manually in Render dashboard — do NOT commit
+        sync: false   # Set manually in Render dashboard
       - key: CORS_ORIGIN
-        sync: false   # Set to your Vercel URL e.g. https://splix2io.vercel.app
+        sync: false   # Set to your Vercel URL e.g. https://splix2io.vercel.app or *
+      - key: MONGODB_URI
+        sync: false   # Set your MongoDB Atlas URI in Render dashboard
