@@ -72,105 +72,119 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   return (
     <div
       style={{
-        width: '100vw',
-        height: '100vh',
+        width: '100%',
+        minHeight: '100%',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px',
+        justifyContent: 'flex-start',
+        padding: 'clamp(10px, 3vw, 24px)',
         position: 'relative',
         background: 'radial-gradient(circle at center, #0d1527 0%, #050810 100%)',
         overflowY: 'auto',
+        overflowX: 'hidden',
+        boxSizing: 'border-box',
       }}
     >
       {/* Top Header Bar */}
-      <div
+      <header
         style={{
-          position: 'absolute',
-          top: '16px',
-          left: '20px',
-          right: '20px',
+          width: '100%',
+          maxWidth: '840px',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '8px',
           zIndex: 10,
+          marginBottom: '12px',
         }}
       >
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button
             type="button"
             onClick={onOpenHowToPlay}
             className="glass-button"
-            style={{ padding: '8px 12px', fontSize: '12px' }}
+            style={{ padding: '6px 10px', fontSize: '12px' }}
+            title="How to Play"
           >
-            <BookOpen size={15} color="#00d2ff" /> HOW TO PLAY
+            <BookOpen size={14} color="#00d2ff" />
+            <span className="btn-label-desktop">HOW TO PLAY</span>
+            <span className="btn-label-mobile">RULES</span>
           </button>
           <button
             type="button"
             onClick={onOpenScoreboard}
             className="glass-button"
-            style={{ padding: '8px 12px', fontSize: '12px' }}
+            style={{ padding: '6px 10px', fontSize: '12px' }}
+            title="Tournament Standings"
           >
-            <Trophy size={15} color="#ffd600" /> STANDINGS
+            <Trophy size={14} color="#ffd600" />
+            <span className="btn-label-desktop">STANDINGS</span>
+            <span className="btn-label-mobile">RANKS</span>
           </button>
           <button
             type="button"
             onClick={() => setShowQrModal(true)}
             className="glass-button"
-            style={{ padding: '8px 12px', fontSize: '12px' }}
+            style={{ padding: '6px 10px', fontSize: '12px' }}
+            title="Scan QR to Join"
           >
-            <QrCode size={15} color="#00ff88" /> PROJECTOR QR
+            <QrCode size={14} color="#00ff88" />
+            <span className="btn-label-desktop">PROJECTOR QR</span>
+            <span className="btn-label-mobile">QR</span>
           </button>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button
             type="button"
             onClick={onStartObserverMode}
             className="glass-button"
-            style={{ padding: '8px 12px', fontSize: '12px', borderColor: '#b026ff', color: '#b026ff' }}
+            style={{ padding: '6px 10px', fontSize: '12px', borderColor: '#b026ff', color: '#b026ff' }}
             title="Observer Mode for Stage Projector"
           >
-            <Eye size={15} color="#b026ff" /> OBSERVER
+            <Eye size={14} color="#b026ff" />
+            <span className="btn-label-desktop">OBSERVER</span>
           </button>
           <button
             type="button"
             onClick={onOpenSettings}
             className="glass-button"
-            style={{ padding: '8px 12px' }}
+            style={{ padding: '6px 10px' }}
             title="Game Settings"
           >
-            <Sliders size={16} />
+            <Sliders size={14} />
           </button>
           <button
             type="button"
             onClick={handleToggleMute}
             className="glass-button"
-            style={{ padding: '8px 12px' }}
+            style={{ padding: '6px 10px' }}
             title={isMuted ? 'Unmute Sound' : 'Mute Sound'}
           >
-            {isMuted ? <VolumeX size={16} color="#ff2a5f" /> : <Volume2 size={16} color="#00d2ff" />}
+            {isMuted ? <VolumeX size={14} color="#ff2a5f" /> : <Volume2 size={14} color="#00d2ff" />}
           </button>
           <button
             type="button"
             onClick={onOpenAdmin}
             className="glass-button"
-            style={{ padding: '8px 14px', fontSize: '12px', border: '1px solid rgba(255, 42, 95, 0.4)' }}
+            style={{ padding: '6px 10px', fontSize: '12px', border: '1px solid rgba(255, 42, 95, 0.4)' }}
+            title="Tournament Admin"
           >
-            <ShieldAlert size={15} color="#ff2a5f" />
-            ADMIN
+            <ShieldAlert size={14} color="#ff2a5f" />
+            <span className="btn-label-desktop">ADMIN</span>
           </button>
         </div>
-      </div>
+      </header>
 
       {/* Main Branding */}
-      <div style={{ textAlign: 'center', marginTop: '40px', marginBottom: '16px' }}>
+      <div style={{ textAlign: 'center', marginTop: '4px', marginBottom: '16px', maxWidth: '100%' }}>
         <div
           style={{
             fontSize: '11px',
             fontWeight: 800,
-            letterSpacing: '4px',
+            letterSpacing: '3px',
             color: '#00d2ff',
             textTransform: 'uppercase',
             marginBottom: '4px',
@@ -181,20 +195,21 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         <h1
           className="neon-title"
           style={{
-            fontSize: 'clamp(32px, 7vw, 52px)',
+            fontSize: 'clamp(26px, 6.5vw, 52px)',
             fontWeight: 900,
-            letterSpacing: '2px',
+            letterSpacing: '1px',
             background: 'linear-gradient(135deg, #ffffff 0%, #00d2ff 50%, #ff2a5f 100%)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             textTransform: 'uppercase',
             lineHeight: '1.1',
+            wordBreak: 'break-word',
           }}
         >
           {GAME_TITLE}
         </h1>
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', marginTop: '6px' }}>
-          <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
             5v5 Squad Territory Domination &bull; 25-Player Match
           </span>
           <span style={{ fontSize: '10px', background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: '4px', color: 'var(--text-muted)' }}>
@@ -209,10 +224,11 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         style={{
           width: '100%',
           maxWidth: '840px',
-          padding: '24px',
+          padding: 'clamp(14px, 4vw, 24px)',
           display: 'flex',
           flexDirection: 'column',
           gap: '16px',
+          boxSizing: 'border-box',
         }}
       >
         {/* Status Bar */}
@@ -449,8 +465,8 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-              gap: '12px',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+              gap: '10px',
             }}
           >
             {availableTeams.map((teamInfo) => {

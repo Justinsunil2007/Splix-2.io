@@ -386,17 +386,27 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        maxWidth: '100vw',
+        position: 'relative',
+        overflow: isLobbyState ? 'auto' : 'hidden',
+        WebkitOverflowScrolling: 'touch',
+      }}
+    >
 
       {/* Global Error / Reconnecting Banner */}
       {(errorMsg || isReconnecting) && (
         <div style={{
-          position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
+          position: 'fixed', top: '12px', left: '50%', transform: 'translateX(-50%)',
           background: isReconnecting ? 'rgba(255, 122, 0, 0.95)' : 'rgba(255, 42, 95, 0.95)',
-          color: '#fff', padding: '8px 20px', borderRadius: '8px',
-          zIndex: 999, fontWeight: 700, fontSize: '14px',
-          boxShadow: '0 4px 16px rgba(0,0,0,0.5)', maxWidth: '90vw', textAlign: 'center',
+          color: '#fff', padding: '6px 16px', borderRadius: '8px',
+          zIndex: 999, fontWeight: 700, fontSize: '13px',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.5)', width: 'max-content', maxWidth: 'calc(100vw - 32px)', textAlign: 'center',
           animation: isReconnecting ? 'neon-pulse 1.5s infinite' : undefined,
+          boxSizing: 'border-box',
         }}>
           {isReconnecting ? `⟳ ${errorMsg || 'Reconnecting...'}` : errorMsg}
         </div>
@@ -405,9 +415,10 @@ export const App: React.FC = () => {
       {/* Initial connecting indicator (first load) */}
       {!isConnected && !isReconnecting && !errorMsg && (
         <div style={{
-          position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
-          background: 'rgba(255, 122, 0, 0.9)', color: '#fff', padding: '6px 18px',
+          position: 'fixed', top: '12px', left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(255, 122, 0, 0.9)', color: '#fff', padding: '5px 14px',
           borderRadius: '20px', zIndex: 999, fontWeight: 700, fontSize: '12px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
         }}>
           ⟳ Connecting to server...
         </div>
